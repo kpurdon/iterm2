@@ -1,0 +1,4 @@
+interface:
+  display_name: "iterm2: tabs"
+  short_description: "Open background tabs in the intended group"
+  default_prompt: "Use $tabs to open a background iTerm2 tab in this project group."

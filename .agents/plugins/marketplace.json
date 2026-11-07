@@ -1,0 +1,20 @@
+{
+  "name": "kpurdon-iterm2",
+  "interface": {
+    "displayName": "iterm2"
+  },
+  "plugins": [
+    {
+      "name": "iterm2",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
