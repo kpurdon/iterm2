@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "iterm2",
-  "version": "0.1.0",
-  "description": "Open background iTerm2 tabs in the intended window and group.",
+  "version": "0.2.0",
+  "description": "Open grouped background iTerm2 tabs and close explicitly selected tabs.",
   "author": {
     "name": "Kyle Purdon"
   },
@@ -12,7 +12,7 @@
       "requires_local_executor": true,
       "interface": {
         "displayName": "iterm2",
-        "shortDescription": "New tabs with reliable grouping",
+        "shortDescription": "Open grouped tabs and close tabs by ID",
         "defaultPrompt": [
           "Use $tabs to open a background iTerm2 tab in this project group."
         ]
