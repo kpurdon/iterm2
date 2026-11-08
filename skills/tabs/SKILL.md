@@ -1,6 +1,6 @@
 ---
 name: tabs
-description: Inspect iTerm2 destinations and open background tabs in the intended window and group.
+description: Inspect iTerm2 destinations, open background tabs in the intended window and group, and close explicitly selected tabs.
 ---
 
 # tabs
@@ -14,3 +14,7 @@ Use `open --new-group NAME` when a separate group is requested; it leaves the or
 Supply the caller's working directory, optional title, and command arguments after `--`. Use `--append-file` for private text that must become one final command argument; the source file remains caller-owned. The helper does not add assignments or infer an agent's configuration. For Codex launches and its optional origin adapter, read [Codex integration](references/codex.md).
 
 Return the creation and grouping results with their IDs. A terminal launch does not prove program startup or delivery. If creation is uncertain, preserve the returned payload file and reconcile the destination before retrying. If creation succeeded but grouping failed, repair only the grouping or report it; never open another tab to fix grouping. Request IDs correlate results and do not prevent duplicate launches.
+
+Use `close --tab-id ID` only for an authorized tab closure, selecting the exact tab ID from `list` or a recorded creation result. Closing a tab closes all its split panes, including minimized panes, and can terminate their running programs. Never infer the target from the current tab or a name. Preserve iTerm's normal confirmation behavior; use `--force` only when bypassing that confirmation is authorized. `--dry-run` validates arguments without connecting or verifying the target. Closing does not require tab-group API support.
+
+Report `close: confirmed` only after refreshed inventory verifies the tab is absent. An uncertain close exits with status 3 and includes the target ID; inspect `list` before retrying or escalating to force. A missing target fails without closing anything. Keep workflow completion and permission to close separate from terminal mechanics.

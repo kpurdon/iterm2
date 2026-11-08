@@ -1,4 +1,4 @@
-"""iTerm2 launch and grouping mechanics."""
+"""iTerm2 launch, grouping, and close mechanics."""
 
 from dataclasses import dataclass, field
 import fcntl
@@ -154,6 +154,44 @@ def launch_iterm(command, *, group_name=None, origin_id=None, origin_name=None, 
         except BaseException as error:
             launch.error = error
     return launch.result()
+
+
+def close_tab(tab_id, *, force=False, api=None):
+    """Close one explicit tab and confirm its absence from a refreshed inventory."""
+    if api is None:
+        import iterm2 as api
+    result = {"close": "not_requested", "tab_id": tab_id}
+    errors = []
+
+    async def run(connection):
+        try:
+            app = await api.async_get_app(connection)
+            await app.async_refresh()
+            tab = app.get_tab_by_id(tab_id)
+            if tab is None:
+                raise RuntimeError(f"no existing iTerm tab with ID {tab_id!r}; use list to verify the target")
+            result["window_id"] = tab.window.window_id if tab.window else None
+            result["close"] = "uncertain"
+            await tab.async_close(force=force)
+            await app.async_refresh()
+            if app.get_tab_by_id(tab_id) is not None:
+                raise RuntimeError("tab is still present after the close request")
+            result["close"] = "confirmed"
+        except BaseException as error:
+            # The SDK runner can swallow exceptions, including cancellation.
+            errors.append(error)
+
+    try:
+        api.run_until_complete(run)
+    except BaseException as error:
+        errors.append(error)
+    if result["close"] == "not_requested":
+        raise (errors[0] if errors else RuntimeError("iTerm did not attempt closure; check that its Python API is enabled"))
+    if errors:
+        message = str(errors[0]) or type(errors[0]).__name__
+        recovery = "closure was verified" if result["close"] == "confirmed" else "use list to reconcile before retrying"
+        result["warning"] = f"{message}; {recovery}"
+    return result
 
 
 def list_destinations(api=None):
