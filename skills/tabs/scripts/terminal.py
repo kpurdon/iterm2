@@ -194,6 +194,56 @@ def close_tab(tab_id, *, force=False, api=None):
     return result
 
 
+def ungroup_tab(tab_id, group_id, *, api=None, lock_path=None):
+    """Dissolve a singleton group while preserving its explicitly selected tab."""
+    if api is None:
+        import iterm2 as api
+    result = {"ungroup": "not_requested", "tab_id": tab_id, "group_id": group_id}
+    errors = []
+
+    async def run(connection):
+        try:
+            app = await api.async_get_app(connection)
+            await app.async_refresh()
+            tab = app.get_tab_by_id(tab_id)
+            if tab is None or tab.window is None:
+                raise RuntimeError("selected tab no longer exists in a window; use list to reconcile")
+            if tab.tab_group is None or tab.tab_group.group_id != group_id:
+                raise RuntimeError("selected tab is not in the recorded group; use list to reconcile")
+            if [member.tab_id for member in group_members(tab.window, tab.tab_group)] != [tab_id]:
+                raise RuntimeError("group still contains other tabs; leave it grouped")
+            result["window_id"] = tab.window.window_id
+            result["ungroup"] = "uncertain"
+            await tab.async_remove_from_tab_group()
+            await app.async_refresh()
+            tab = app.get_tab_by_id(tab_id)
+            if tab is None or tab.tab_group is not None:
+                raise RuntimeError("selected tab was not preserved as an ungrouped tab")
+            if any(group.group_id == group_id for window in app.terminal_windows for group in window.tab_groups):
+                raise RuntimeError("recorded group is still present after the ungroup request")
+            result["ungroup"] = "confirmed"
+        except BaseException as error:
+            # the SDK runner can swallow exceptions, including cancellation
+            errors.append(error)
+
+    # serialize with launches so a new worker cannot join during ungrouping
+    lock_path = lock_path or Path.home() / ".cache/iterm2/launch.lock"
+    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            api.run_until_complete(run)
+        except BaseException as error:
+            errors.append(error)
+    if result["ungroup"] == "not_requested":
+        raise (errors[0] if errors else RuntimeError("iTerm did not attempt ungrouping; check that its Python API is enabled"))
+    if errors:
+        message = str(errors[0]) or type(errors[0]).__name__
+        recovery = "ungrouping was verified" if result["ungroup"] == "confirmed" else "use list to reconcile before retrying"
+        result["warning"] = f"{message}; {recovery}"
+    return result
+
+
 def list_destinations(api=None):
     """Read IDs and names needed to select a destination; never read terminal output."""
     if api is None:
