@@ -229,7 +229,7 @@ def ungroup_tab(tab_id, group_id, *, api=None, lock_path=None):
     # serialize with launches so a new worker cannot join during ungrouping
     lock_path = lock_path or Path.home() / ".cache/iterm2/launch.lock"
     lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with lock_path.open("a") as lock:
+    with lock_path.open("a", encoding="utf-8") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             api.run_until_complete(run)
