@@ -13,7 +13,7 @@ import tempfile
 import uuid
 
 from origin import resolve_origin
-from terminal import close_tab, launch_iterm, list_destinations
+from terminal import close_tab, launch_iterm, list_destinations, ungroup_tab
 
 
 def launch_command(payload_path):
@@ -46,6 +46,10 @@ def parse_args(argv):
     closing.add_argument("--tab-id", required=True, help="verified tab ID from list or an open result")
     closing.add_argument("--force", action="store_true", help="bypass iTerm's close confirmation")
     closing.add_argument("--dry-run", action="store_true", help="validate input without connecting to iTerm")
+    ungrouping = commands.add_parser("ungroup", help="dissolve a singleton group, keeping its tab open")
+    ungrouping.add_argument("--tab-id", required=True, help="verified tab ID to preserve")
+    ungrouping.add_argument("--group-id", required=True, help="recorded group ID containing only this tab")
+    ungrouping.add_argument("--dry-run", action="store_true", help="validate input without connecting to iTerm")
     opening = commands.add_parser("open", help="open one new background tab")
     opening.add_argument("--cwd", type=Path, default=Path.cwd())
     opening.add_argument("--title", help="initial terminal title; does not name an agent's conversation")
@@ -63,9 +67,12 @@ def parse_args(argv):
     opening.add_argument("--dry-run", action="store_true", help="validate input without connecting to iTerm")
     opening.add_argument("command", nargs=argparse.REMAINDER, help="command and arguments after --; defaults to login zsh")
     args = parser.parse_args(argv)
-    if args.operation == "close":
+    if args.operation in ("close", "ungroup"):
         if not args.tab_id.strip() or any(ord(c) < 32 or ord(c) == 127 for c in args.tab_id):
             parser.error("tab ID must be nonempty and contain no control characters")
+        if args.operation == "ungroup" and (not args.group_id.strip() or
+                any(ord(c) < 32 or ord(c) == 127 for c in args.group_id)):
+            parser.error("group ID must be nonempty and contain no control characters")
         if not args.dry_run and sys.platform != "darwin":
             parser.error("iTerm2 requires macOS")
         return args
@@ -105,6 +112,14 @@ def main(argv=None):
         if args.operation == "list":
             print(json.dumps(list_destinations()))
             return 0
+        if args.operation == "ungroup":
+            result = ({"ungroup": "dry-run", "tab_id": args.tab_id, "group_id": args.group_id,
+                       "destination": "unverified"}
+                      if args.dry_run else ungroup_tab(args.tab_id, args.group_id))
+            print(json.dumps(result))
+            if "warning" in result:
+                print(f"iterm2: {result['ungroup']}: {result['warning']}", file=sys.stderr)
+            return 3 if result["ungroup"] == "uncertain" else 0
         if args.operation == "close":
             result = ({"close": "dry-run", "tab_id": args.tab_id, "destination": "unverified"}
                       if args.dry_run else close_tab(args.tab_id, force=args.force))

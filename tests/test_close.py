@@ -1,4 +1,4 @@
-"""Close behavior against a simulated iTerm API; no live terminals are changed."""
+"""Retirement behavior against a simulated iTerm API; no live terminals are changed."""
 
 import asyncio
 from contextlib import redirect_stderr, redirect_stdout
@@ -6,13 +6,14 @@ import io
 import json
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/tabs/scripts"))
 import tabs
-from terminal import close_tab
+from terminal import close_tab, ungroup_tab
 
 
 class FakeAPI:
@@ -97,6 +98,67 @@ class CloseTests(unittest.TestCase):
         self.assertIn("closure was verified", result["warning"])
 
 
+class GroupAPI(FakeAPI):
+    def __init__(self, *, shared=False, disappears=False, group_remains=False, **options):
+        super().__init__(**options)
+        self.group = SimpleNamespace(group_id="group")
+        self.target.tab_group = self.group
+        self.other.tab_group = self.group if shared else None
+        self.target.async_remove_from_tab_group = self.ungroup
+        self.target.window.tabs = list(self.tabs.values())
+        self.target.window.tab_groups = [self.group]
+        self.terminal_windows = [self.target.window]
+        self.disappears = disappears
+        self.group_remains = group_remains
+        self.ungroup_calls = 0
+
+    async def ungroup(self):
+        self.ungroup_calls += 1
+        if not self.remains:
+            self.target.tab_group = None
+            if not self.group_remains:
+                self.target.window.tab_groups = []
+        if self.disappears:
+            del self.tabs["target"]
+
+
+class UngroupTests(unittest.TestCase):
+    def ungroup(self, api, group_id="group"):
+        with tempfile.TemporaryDirectory() as directory:
+            return ungroup_tab("target", group_id, api=api, lock_path=Path(directory) / "launch.lock")
+
+    def test_dissolves_group_without_closing_any_tabs(self):
+        api = GroupAPI()
+        result = self.ungroup(api)
+        self.assertEqual(result["ungroup"], "confirmed")
+        self.assertIs(api.tabs["target"], api.target)
+        self.assertIsNone(api.target.tab_group)
+        self.assertEqual(api.target.window.tab_groups, [])
+        self.assertIn("other", api.tabs)
+        self.assertEqual(api.close_calls, [])
+
+    def test_refuses_other_members_missing_tab_and_wrong_group(self):
+        for options, group_id in (({"shared": True}, "group"), ({"missing": True}, "group"),
+                                  ({}, "wrong"), ({"refresh_error_at": 1}, "group")):
+            with self.subTest(options=options, group_id=group_id):
+                api = GroupAPI(**options)
+                with self.assertRaises(RuntimeError):
+                    self.ungroup(api, group_id)
+                self.assertEqual(api.ungroup_calls, 0)
+                self.assertEqual(api.close_calls, [])
+
+    def test_unverified_dissolution_never_claims_success_or_retries(self):
+        for options in ({"remains": True}, {"refresh_error_at": 2}, {"disappears": True},
+                        {"group_remains": True}):
+            with self.subTest(options=options):
+                api = GroupAPI(**options)
+                result = self.ungroup(api)
+                self.assertEqual(result["ungroup"], "uncertain")
+                self.assertIn("reconcile before retrying", result["warning"])
+                self.assertEqual(api.ungroup_calls, 1)
+                self.assertEqual(api.close_calls, [])
+
+
 class CLITests(unittest.TestCase):
     def invoke(self, argv):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -146,6 +208,28 @@ class CLITests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(stdout, "")
         self.assertIn("missing target", stderr)
+
+    def test_ungroup_requires_both_explicit_ids(self):
+        for argv in (["ungroup", "--tab-id", "target"],
+                     ["ungroup", "--tab-id", "target", "--group-id", "\n"]):
+            with self.subTest(argv=argv), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    tabs.parse_args(argv)
+
+    def test_ungroup_dry_run_does_not_connect(self):
+        with patch.object(tabs.sys, "platform", "linux"), patch.object(tabs, "ungroup_tab") as ungroup:
+            status, stdout, _ = self.invoke(["ungroup", "--tab-id", "target", "--group-id", "group", "--dry-run"])
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(stdout)["ungroup"], "dry-run")
+        ungroup.assert_not_called()
+
+    def test_routes_ungroup_and_reports_uncertainty(self):
+        with patch.object(tabs.sys, "platform", "darwin"), patch.object(tabs, "ungroup_tab", return_value={
+                "ungroup": "uncertain", "warning": "refresh failed"}) as ungroup:
+            status, _, stderr = self.invoke(["ungroup", "--tab-id", "target", "--group-id", "group"])
+        self.assertEqual(status, 3)
+        self.assertIn("refresh failed", stderr)
+        ungroup.assert_called_once_with("target", "group")
 
 
 if __name__ == "__main__":
